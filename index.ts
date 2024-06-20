@@ -1,6 +1,6 @@
-import { Client, IntentsBitField, TextChannel, MessageReaction, User } from 'discord.js';
-import { schedule } from 'node-cron';
-import * as moment from 'moment-timezone';
+const { Client, IntentsBitField, TextChannel, MessageReaction, User } = require('discord.js');
+const { schedule } = require('node-cron');
+const moment = require('moment-timezone');
 require('dotenv').config();
 
 const client = new Client({
