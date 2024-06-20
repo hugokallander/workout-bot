@@ -23,14 +23,14 @@ const getStockholmTime = () => moment.tz('Europe/Stockholm');
 
 const nextWeekDates = () => {
     const now = getStockholmTime();
-    const dates: moment.Moment[] = [];
+    const dates = [];
     for (let i = 7; i < 14; i++) {
         dates.push(now.clone().add(i, 'days'));
     }
     return dates;
 };
 
-const determineActivityTime = (day: string, activity: string) => {
+const determineActivityTime = (day, activity) => {
     const weekdays = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"];
     if (weekdays.includes(day)) {
         return activity === 'gym' ? '17:30' : '16:30';
@@ -39,9 +39,9 @@ const determineActivityTime = (day: string, activity: string) => {
     }
 };
 
-const determineOptimalSchedule = (gymSchedule: User[][], runSchedule: User[][]) => {
+const determineOptimalSchedule = (gymSchedule, runSchedule) => {
     const days = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
-    const schedule: { day: string, activity: string, users: User[], date: moment.Moment, time: string }[] = [];
+    const schedule = [];
     let runDays = 0;
 
     const sortedDays = days.map((day, i) => {
@@ -81,7 +81,7 @@ const determineOptimalSchedule = (gymSchedule: User[][], runSchedule: User[][]) 
     return schedule;
 };
 
-const formatScheduleMessage = (weeklySchedule: any[]) => {
+const formatScheduleMessage = (weeklySchedule) => {
     const days = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
     let message = "";
 
@@ -89,20 +89,20 @@ const formatScheduleMessage = (weeklySchedule: any[]) => {
         const daySchedule = weeklySchedule[i];
         const day = days[i];
         const activity = daySchedule.activity === "gym" ? "gym" : "löpning";
-        const users = daySchedule.users.map((user: User) => user.toString()).join(" ");
+        const users = daySchedule.users.map(user => user.toString()).join(" ");
         const time = daySchedule.time;
         message += `- ${day} ${daySchedule.date} ${activity} kl. ${time}: ${users}\n`;
     }
     return message;
 };
 
-const fetchChannelMessages = async (channelId: string) => {
-    const channel = client.channels.cache.get(channelId) as TextChannel;
+const fetchChannelMessages = async (channelId) => {
+    const channel = client.channels.cache.get(channelId);
     return await channel.messages.fetch({ limit: 1 });
 };
 
-const fetchReactionsUsers = async (reactions: MessageReaction[]) => {
-    const users: User[][] = [];
+const fetchReactionsUsers = async (reactions) => {
+    const users = [];
     for (const reaction of reactions) {
         if (reaction.emoji.name && /^[1-7]$/.test(reaction.emoji.name)) {
             const fetchedUsers = await reaction.users.fetch();
@@ -112,13 +112,13 @@ const fetchReactionsUsers = async (reactions: MessageReaction[]) => {
     return users;
 };
 
-const fetchNonResponders = async (channelId: string, roleName: string) => {
-    const channel = client.channels.cache.get(channelId) as TextChannel;
+const fetchNonResponders = async (channelId, roleName) => {
+    const channel = client.channels.cache.get(channelId);
     const messages = await fetchChannelMessages(channelId);
     const message = messages.first();
     const reactions = message?.reactions.cache;
     const allMembers = await channel.guild.members.fetch();
-    const responders: Set<string> = new Set();
+    const responders = new Set();
 
     if (reactions) {
         for (const reaction of reactions.values()) {
@@ -132,7 +132,7 @@ const fetchNonResponders = async (channelId: string, roleName: string) => {
     return Array.from(members.values()).filter(member => !responders.has(member.id) && member.id !== client.user?.id);
 };
 
-const getActivitySchedule = async (channelId: string) => {
+const getActivitySchedule = async (channelId) => {
     const messages = await fetchChannelMessages(channelId);
     const reactions = messages.first()?.reactions.cache;
     
@@ -141,7 +141,7 @@ const getActivitySchedule = async (channelId: string) => {
     return schedule;
 }
 
-const sendActivityMessage = async (activity: string, channelId: string) => {
+const sendActivityMessage = async (activity, channelId) => {
     const dates = nextWeekDates();
     const weekNumber = dates[0].isoWeek() + 1;
     let message = `@${activity} Välj de dagar du kan ${activity}a för vecka ${weekNumber}:`;
@@ -153,7 +153,7 @@ const sendActivityMessage = async (activity: string, channelId: string) => {
 
     message += "\n🚫: kan inte denna vecka😭";
 
-    const channel = client.channels.cache.get(channelId) as TextChannel;
+    const channel = client.channels.cache.get(channelId);
     const sentMessage = await channel.send(message);
 
     // React to the message with emojis 1 through 7
@@ -164,18 +164,18 @@ const sendActivityMessage = async (activity: string, channelId: string) => {
     return sentMessage;
 };
 
-const fetchLatestActivityMessage = async (channelId: string) => {
-    const channel = client.channels.cache.get(channelId) as TextChannel;
+const fetchLatestActivityMessage = async (channelId) => {
+    const channel = client.channels.cache.get(channelId);
     const messages = await channel.messages.fetch({ limit: 1 });
     return messages.first();
 };
 
-const sendReminder = async (activity: string, channelId: string, roleName: string) => {
+const sendReminder = async (activity, channelId, roleName) => {
     const nonResponders = await fetchNonResponders(channelId, roleName);
     if (nonResponders.length > 0) {
         const latestActivityMessage = await fetchLatestActivityMessage(channelId);
         const reminder = `Påminnelse: Svara på veckans ${activity}-signup [här](${latestActivityMessage?.url})!\n` + nonResponders.map(member => member.toString()).join(" ");
-        const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID) as TextChannel;
+        const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID);
         await reminderChannel.send(reminder);
     }
 };
@@ -197,7 +197,7 @@ client.once('ready', () => {
 
         const weeklySchedule = determineOptimalSchedule(gymSchedule, runSchedule);
         const message = formatScheduleMessage(weeklySchedule);
-        const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID) as TextChannel;
+        const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
         await announcementChannel.send(message);
     });
 
@@ -214,8 +214,8 @@ client.once('ready', () => {
 });
 
 const sendActivityReminder = async () => {
-    const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID) as TextChannel;
-    const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID) as TextChannel;
+    const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID);
+    const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
     const summaryMessages = await announcementChannel.messages.fetch({ limit: 1 });
 
     if (summaryMessages.size > 0) {
