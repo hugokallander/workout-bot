@@ -1,6 +1,7 @@
-const { Client, IntentsBitField, TextChannel, MessageReaction, User } = require('discord.js');
+const { Client, IntentsBitField } = require('discord.js');
 const { schedule } = require('node-cron');
 const moment = require('moment-timezone');
+const { get } = require('http');
 require('dotenv').config();
 
 const client = new Client({
@@ -11,6 +12,11 @@ const client = new Client({
         IntentsBitField.Flags.GuildMembers,
     ],
 });
+
+const timezoneOption = {
+    timezone: 'Europe/Stockholm',
+    scheduled: true
+};
 
 const GYM_CHANNEL_ID = process.env.GYM_CHANNEL_ID;
 const RUN_CHANNEL_ID = process.env.RUN_CHANNEL_ID;
@@ -30,55 +36,68 @@ const nextWeekDates = () => {
     return dates;
 };
 
+const getDateForNextWeekday = (i) => {
+    const now = getStockholmTime();
+    const currentDayOfWeek = now.day();
+    let daysUntilNextWeekday = i - currentDayOfWeek + 8;
+
+    return now.clone().add(daysUntilNextWeekday, 'days');
+};
+
 const determineActivityTime = (day, activity) => {
-    const weekdays = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag"];
-    if (weekdays.includes(day)) {
+    if (day < 5) {
         return activity === 'gym' ? '17:30' : '16:30';
     } else {
         return '10:00';
     }
 };
 
-const determineOptimalSchedule = (gymSchedule, runSchedule) => {
-    const days = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
-    const schedule = [];
-    let runDays = 0;
+const isValidSchedule = (schedule) => {
+    const runDayIndices = schedule.map((day, index) => day === 'run' ? index : -1).filter(index => index !== -1);
+    return runDayIndices.length === 3 && runDayIndices[1] - runDayIndices[0] > 1 && runDayIndices[2] - runDayIndices[1] > 1;
+};
 
-    const sortedDays = days.map((day, i) => {
-        return {
-            day: day,
-            gymUsers: gymSchedule[i],
-            runUsers: runSchedule[i],
-            totalUsers: gymSchedule[i].length + runSchedule[i].length,
-            date: nextWeekDates()[i]
-        };
-    }).sort((a, b) => b.totalUsers - a.totalUsers);
+const totalNumParticipants = (schedule, gymSchedule, runSchedule) => schedule.reduce(
+    (accumulatedParticipants, activity, dayNum) => {
+        return accumulatedParticipants + (activity === 'gym' ? gymSchedule[dayNum].length : runSchedule[dayNum].length);
+    },
+0);
 
-    for (let i = 0; i < sortedDays.length; i++) {
-        const prevDay = schedule[i - 1];
-        const nextDay = schedule[i + 1];
-        
-        if (runDays < 3 && (!prevDay || prevDay.activity !== 'run') && (!nextDay || nextDay.activity !== 'run')) {
-            schedule.push({
-                day: sortedDays[i].day,
-                activity: 'run',
-                users: sortedDays[i].runUsers,
-                date: sortedDays[i].date,
-                time: determineActivityTime(sortedDays[i].day, 'run')
-            });
-            runDays++;
-        } else {
-            schedule.push({
-                day: sortedDays[i].day,
-                activity: 'gym',
-                users: sortedDays[i].gymUsers,
-                date: sortedDays[i].date,
-                time: determineActivityTime(sortedDays[i].day, 'gym')
-            });
+const findBestSchedule = (runDaysTarget, gymSchedule, runSchedule, numAssignedRunDays = 0, lastAssignedRunDay = -1, schedule = new Array(7).fill('gym'), maxNumParticipants = 0) => {
+    if (numAssignedRunDays === runDaysTarget) {
+        return schedule;
+    }
+
+    let bestSchedule = [];
+    for (let runDay = lastAssignedRunDay + 1; runDay < gymSchedule.length + (numAssignedRunDays - runDaysTarget); runDay++) {
+        const newSchedule = [...schedule];
+        newSchedule[runDay] = 'run';
+        const newFullSchedule = findBestSchedule(runDaysTarget, gymSchedule, runSchedule, numAssignedRunDays + 1, runDay, newSchedule, maxNumParticipants);
+        const newNumParticipants = totalNumParticipants(newFullSchedule, gymSchedule, runSchedule);
+
+        if (newNumParticipants > maxNumParticipants && isValidSchedule(newFullSchedule)) {
+            maxNumParticipants = newNumParticipants;
+            bestSchedule = newFullSchedule;
         }
     }
 
-    return schedule;
+    return bestSchedule;
+}
+
+const getActivityDay = (activity, dayNum, gymSchedule, runSchedule) => {
+    return {
+        activity: activity,
+        users: activity === 'gym' ? gymSchedule[dayNum] : runSchedule[dayNum],
+        date: getDateForNextWeekday(dayNum).format('DD/MM'),
+        time: determineActivityTime(dayNum, activity)
+    };
+}
+
+const determineOptimalSchedule = (gymSchedule, runSchedule) => {
+    const bestSchedule = findBestSchedule(3, gymSchedule, runSchedule);
+    const weeklySchedule = bestSchedule.map((activity, i) => getActivityDay(activity, i, gymSchedule, runSchedule));
+
+    return weeklySchedule;
 };
 
 const formatScheduleMessage = (weeklySchedule) => {
@@ -104,7 +123,7 @@ const fetchChannelMessages = async (channelId) => {
 const fetchReactionsUsers = async (reactions) => {
     const users = [];
     for (const reaction of reactions) {
-        if (reaction.emoji.name && /^[1-7]$/.test(reaction.emoji.name)) {
+        if (reaction.emoji.name && /^[\u0031-\u0037]\uFE0F\u20E3$/.test(reaction.emoji.name)) {
             const fetchedUsers = await reaction.users.fetch();
             users[parseInt(reaction.emoji.name) - 1] = Array.from(fetchedUsers.values());
         }
@@ -188,7 +207,7 @@ client.once('ready', () => {
     schedule('0 12 * * 1', async () => {
         await sendActivityMessage('gym', GYM_CHANNEL_ID);
         await sendActivityMessage('spring', RUN_CHANNEL_ID);
-    });
+    }, timezoneOption);
 
     // Summary messages on Fridays at noon
     schedule('0 12 * * 5', async () => {
@@ -199,18 +218,18 @@ client.once('ready', () => {
         const message = formatScheduleMessage(weeklySchedule);
         const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
         await announcementChannel.send(message);
-    });
+    }, timezoneOption);
 
     // Reminders for users who haven't responded
     schedule('0 12 * * 2-4', async () => {
         await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring');
         await sendReminder('gym', RUN_CHANNEL_ID, 'gym');
-    });
+    }, timezoneOption);
 
     // Daily activity reminders
     schedule('0 9 * * *', async () => {
         await sendActivityReminder();
-    });
+    }, timezoneOption);
 });
 
 const sendActivityReminder = async () => {
