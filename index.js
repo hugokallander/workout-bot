@@ -216,18 +216,20 @@ client.once('ready', () => {
 const sendActivityReminder = async () => {
     const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID);
     const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
-    const summaryMessages = await announcementChannel.messages.fetch({ limit: 1 });
+    const summaryMessages = await announcementChannel.messages.fetch({ limit: 2 });
 
     if (summaryMessages.size > 0) {
-        const summaryMessage = summaryMessages.first()?.content.split('\n') || [];
         const now = getStockholmTime();
         const dateStr = now.format('DD/MM');
 
-        for (const line of summaryMessage) {
-            if (line.includes(dateStr)) {
-                const participants = line.split(':')[1].trim();
-                const reminderMessage = `Påminnelse: Dagens aktivitet (${line.split(':')[0]}): ${participants}`;
-                await reminderChannel.send(reminderMessage);
+        for (const summaryMessage of summaryMessages.values()) {
+            const lines = summaryMessage.content.split('\n') || [];
+            for (const line of lines) {
+                if (line.includes(dateStr)) {
+                    const participants = line.split(':')[1].trim();
+                    const reminderMessage = `Påminnelse: Dagens aktivitet (${line.split(':')[0]}): ${participants}`;
+                    await reminderChannel.send(reminderMessage);
+                }
             }
         }
     }
