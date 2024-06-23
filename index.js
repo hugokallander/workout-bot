@@ -288,14 +288,14 @@ client.once('ready', () => {
     const ANNOUNCEMENT_CHANNEL_ID = process.env.ANNOUNCEMENT_CHANNEL_ID;
     const REMINDER_CHANNEL_ID = process.env.REMINDER_CHANNEL_ID;
     const TIME_CHANNEL_ID = process.env.TIME_CHANNEL_ID;
-    const dayNames = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
+    const DAY_NAMES = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
 
     console.log(`Logged in as ${client.user?.tag}!`);
 
     // Weekly messages on Mondays at noon
     schedule('0 12 * * 1', async () => {
-        await sendActivityMessage('gym', GYM_CHANNEL_ID, dayNames, TIME_CHANNEL_ID);
-        await sendActivityMessage('spring', RUN_CHANNEL_ID, dayNames, TIME_CHANNEL_ID);
+        await sendActivityMessage('gym', GYM_CHANNEL_ID, DAY_NAMES, TIME_CHANNEL_ID);
+        await sendActivityMessage('spring', RUN_CHANNEL_ID, DAY_NAMES, TIME_CHANNEL_ID);
     }, timezoneOption);
 
     // Summary messages on Fridays at noon
@@ -304,16 +304,16 @@ client.once('ready', () => {
         const runSchedule = await getActivitySchedule(RUN_CHANNEL_ID);
 
         const weeklySchedule = await determineOptimalSchedule(
-            gymSchedule, runSchedule, TIME_CHANNEL_ID, dayNames);
-        const message = formatScheduleMessage(weeklySchedule);
+            gymSchedule, runSchedule, TIME_CHANNEL_ID, DAY_NAMES);
+        const message = formatScheduleMessage(weeklySchedule, DAY_NAMES);
         const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
         await announcementChannel.send(message);
     }, timezoneOption);
 
     // Reminders for users who haven't responded
     schedule('0 12 * * 2-4', async () => {
-        await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring');
-        await sendReminder('gym', RUN_CHANNEL_ID, 'gym');
+        await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring', REMINDER_CHANNEL_ID);
+        await sendReminder('gym', RUN_CHANNEL_ID, 'gym', REMINDER_CHANNEL_ID);
     }, timezoneOption);
 
     // Daily activity reminders
