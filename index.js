@@ -243,7 +243,8 @@ const sendReminder = async (activity, channelId, roleName, reminderChannelId) =>
 const sendActivityReminder = async (reminderChannelId, announcementChannelId) => {
     const reminderChannel = client.channels.cache.get(reminderChannelId);
     const announcementChannel = client.channels.cache.get(announcementChannelId);
-    const summaryMessages = await announcementChannel.messages.fetch({ limit: 2 });
+    const summaryMessages = await announcementChannel.messages.fetch({ limit: 10 });
+    let dateMessages = {};
 
     if (summaryMessages.size > 0) {
         const now = getStockholmTime();
@@ -254,11 +255,14 @@ const sendActivityReminder = async (reminderChannelId, announcementChannelId) =>
             for (const line of lines) {
                 if (line.includes(dateStr)) {
                     const participants = line.split(':')[1].trim();
-                    const reminderMessage = `Påminnelse: Dagens aktivitet (${line.split(':')[0]}): ${participants}`;
-                    await reminderChannel.send(reminderMessage);
+                    dateMessages[dateStr] = `Påminnelse: Dagens aktivitet (${line.split(':')[0]}): ${participants}`;
                 }
             }
         }
+    }
+
+    for (const dateMessage of Object.values(dateMessages)) {
+        await reminderChannel.send(dateMessage);
     }
 };
 
@@ -290,8 +294,8 @@ client.once('ready', () => {
 
     // Weekly messages on Mondays at noon
     schedule('0 12 * * 1', async () => {
-        await sendActivityMessage('gym', GYM_CHANNEL_ID, dayNames, timeChannelId);
-        await sendActivityMessage('spring', RUN_CHANNEL_ID, dayNames, timeChannelId);
+        await sendActivityMessage('gym', GYM_CHANNEL_ID, dayNames, TIME_CHANNEL_ID);
+        await sendActivityMessage('spring', RUN_CHANNEL_ID, dayNames, TIME_CHANNEL_ID);
     }, timezoneOption);
 
     // Summary messages on Fridays at noon
