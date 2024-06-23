@@ -1,30 +1,8 @@
 const { Client, IntentsBitField } = require('discord.js');
 const { schedule } = require('node-cron');
 const moment = require('moment-timezone');
-const { get } = require('http');
 require('dotenv').config();
 
-const client = new Client({
-    intents: [
-        IntentsBitField.Flags.Guilds,
-        IntentsBitField.Flags.GuildMessages,
-        IntentsBitField.Flags.GuildMessageReactions,
-        IntentsBitField.Flags.GuildMembers,
-    ],
-});
-
-const timezoneOption = {
-    timezone: 'Europe/Stockholm',
-    scheduled: true
-};
-
-const GYM_CHANNEL_ID = process.env.GYM_CHANNEL_ID;
-const RUN_CHANNEL_ID = process.env.RUN_CHANNEL_ID;
-const ANNOUNCEMENT_CHANNEL_ID = process.env.ANNOUNCEMENT_CHANNEL_ID;
-const REMINDER_CHANNEL_ID = process.env.REMINDER_CHANNEL_ID;
-const TOKEN = process.env.TOKEN;
-
-// Utility functions
 const getStockholmTime = () => moment.tz('Europe/Stockholm');
 
 const nextWeekDates = () => {
@@ -44,13 +22,59 @@ const getDateForNextWeekday = (i) => {
     return now.clone().add(daysUntilNextWeekday, 'days');
 };
 
-const determineActivityTime = (day, activity) => {
-    if (day < 5) {
-        return activity === 'gym' ? '17:30' : '16:30';
-    } else {
-        return '10:00';
-    }
-};
+function getCurrentAndPreviousWeekNumbers() {
+    const now = getStockholmTime();
+    const currentWeekNumber = now.isoWeek();
+    const previousWeekNumber = currentWeekNumber - 1;
+    return { currentWeekNumber, previousWeekNumber };
+}
+
+function isMessageRelevant(message, currentWeekNumber, previousWeekNumber) {
+    const messageDate = moment(message.createdTimestamp).tz('Europe/Stockholm');
+    const messageWeekNumber = messageDate.isoWeek();
+    const isCurrentOrPreviousWeek = messageWeekNumber === currentWeekNumber || messageWeekNumber === previousWeekNumber;
+    const isDefault = message.content.includes("default");
+    return isCurrentOrPreviousWeek || isDefault;
+}
+
+function processLine(line, dayNames, activityTimes) {
+    const timeMatch = line.match(/(\d{2}:\d{2}|x)/);
+    dayNames.forEach((dayName, index) => {
+        if (line.toLowerCase().includes(dayName.toLowerCase())) {
+            if (timeMatch) {
+                if (line.includes("gym") && !line.includes("run")) {
+                    activityTimes.gym[index] = timeMatch[0];
+                } else if (line.includes("run") && !line.includes("gym")) {
+                    activityTimes.run[index] = timeMatch[0];
+                } else {
+                    activityTimes.gym[index] = timeMatch[0];
+                    activityTimes.run[index] = timeMatch[0];
+                }
+            }
+        }
+    });
+}
+
+async function getActivityTimes(timeChannelId, dayNames) {
+    let activityTimes = {
+        gym: ["17:30", "17:30", "17:30", "17:30", "17:30", "10:00", "10:00"],
+        run: ["16:30", "16:30", "16:30", "16:30", "16:30", "10:00", "10:00"]
+    };
+
+    const { currentWeekNumber, previousWeekNumber } = getCurrentAndPreviousWeekNumbers();
+    const channel = client.channels.cache.get(timeChannelId);
+    const messages = await channel.messages.fetch({ limit: 1000 });
+
+    messages.forEach(message => {
+        if (isMessageRelevant(message, currentWeekNumber, previousWeekNumber)) {
+            message.content.split('\n').forEach(line => {
+                processLine(line, dayNames, activityTimes);
+            });
+        }
+    });
+
+    return activityTimes;
+}
 
 const isValidSchedule = (schedule) => {
     const runDayIndices = schedule.map((day, index) => day === 'run' ? index : -1).filter(index => index !== -1);
@@ -63,13 +87,14 @@ const totalNumParticipants = (schedule, gymSchedule, runSchedule) => schedule.re
     },
 0);
 
-const findBestSchedule = (runDaysTarget, gymSchedule, runSchedule, numAssignedRunDays = 0, lastAssignedRunDay = -1, schedule = new Array(7).fill('gym'), maxNumParticipants = 0) => {
+const findBestSchedule = (runDaysTarget, gymSchedule, runSchedule, schedule = new Array(7).fill('gym'), numAssignedRunDays = 0, lastAssignedRunDay = -1, maxNumParticipants = 0) => {
     if (numAssignedRunDays === runDaysTarget) {
         return schedule;
     }
 
     let bestSchedule = [];
-    for (let runDay = lastAssignedRunDay + 1; runDay < gymSchedule.length + (numAssignedRunDays - runDaysTarget); runDay++) {
+    for (let runDay = lastAssignedRunDay + 1; runDay < runSchedule.length + (numAssignedRunDays - runDaysTarget); runDay++) {
+        if (runSchedule[runDay].length === 0) continue;
         const newSchedule = [...schedule];
         newSchedule[runDay] = 'run';
         const newFullSchedule = findBestSchedule(runDaysTarget, gymSchedule, runSchedule, numAssignedRunDays + 1, runDay, newSchedule, maxNumParticipants);
@@ -84,33 +109,43 @@ const findBestSchedule = (runDaysTarget, gymSchedule, runSchedule, numAssignedRu
     return bestSchedule;
 }
 
-const getActivityDay = (activity, dayNum, gymSchedule, runSchedule) => {
+const getActivityObj = (activity, dayNum, gymSchedule, runSchedule, activityTime) => {
     return {
         activity: activity,
         users: activity === 'gym' ? gymSchedule[dayNum] : runSchedule[dayNum],
         date: getDateForNextWeekday(dayNum).format('DD/MM'),
-        time: determineActivityTime(dayNum, activity)
+        time: activityTime
     };
 }
 
-const determineOptimalSchedule = (gymSchedule, runSchedule) => {
-    const bestSchedule = findBestSchedule(3, gymSchedule, runSchedule);
-    const weeklySchedule = bestSchedule.map((activity, i) => getActivityDay(activity, i, gymSchedule, runSchedule));
+const determineOptimalSchedule = async (gymSchedule, runSchedule, timeChannelId, dayNames) => {
+    const nonEmptyGymDays = gymSchedule.map(day => day.length > 0 ? "gym" : null);
+    const bestSchedule = findBestSchedule(3, gymSchedule, runSchedule, nonEmptyGymDays);
+    const activityTimes = await getActivityTimes(timeChannelId, dayNames);
+    const weeklySchedule = bestSchedule.map((activityName, dayNum) => {
+        if (!activityName) {
+            return null;
+        }
+        getActivityObj(activityName, dayNum, gymSchedule, runSchedule, activityTimes[activityName][dayNum])
+    });
 
     return weeklySchedule;
 };
 
-const formatScheduleMessage = (weeklySchedule) => {
-    const days = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
+const formatScheduleMessage = (weeklySchedule, dayNames) => {
     let message = "";
 
     for (let i = 0; i < weeklySchedule.length; i++) {
-        const daySchedule = weeklySchedule[i];
-        const day = days[i];
-        const activity = daySchedule.activity === "gym" ? "gym" : "löpning";
-        const users = daySchedule.users.map(user => user.toString()).join(" ");
-        const time = daySchedule.time;
-        message += `- ${day} ${daySchedule.date} ${activity} kl. ${time}: ${users}\n`;
+        const dayActivity = weeklySchedule[i];
+        if (!dayActivity) {
+            continue;
+        }
+
+        const day = dayNames[i];
+        const activity = dayActivity.activity === "gym" ? "gym" : "löpning";
+        const users = dayActivity.users.map(user => user.toString()).join(" ");
+        const time = dayActivity.time;
+        message += `- ${day} ${dayActivity.date} ${activity} kl. ${time}: ${users}\n`;
     }
     return message;
 };
@@ -136,7 +171,6 @@ const fetchNonResponders = async (channelId, roleName) => {
     const messages = await fetchChannelMessages(channelId);
     const message = messages.first();
     const reactions = message?.reactions.cache;
-    const allMembers = await channel.guild.members.fetch();
     const responders = new Set();
 
     if (reactions) {
@@ -160,14 +194,20 @@ const getActivitySchedule = async (channelId) => {
     return schedule;
 }
 
-const sendActivityMessage = async (activity, channelId) => {
+const sendActivityMessage = async (activity, channelId, dayNames, timeChannelId) => {
     const dates = nextWeekDates();
     const weekNumber = dates[0].isoWeek() + 1;
+    const activityTimes = await getActivityTimes(timeChannelId, dayNames)[activity];
     let message = `@${activity} Välj de dagar du kan ${activity}a för vecka ${weekNumber}:`;
 
-    dates.forEach((date, i) => {
-        const day = date.format('dddd DD/MM');
-        message += `\n${i + 1}️⃣: ${day}`;
+    dates.forEach((date, dayNum) => {
+        const time = activityTimes[dayNum];
+        if (time === 'x') return;
+
+        const dayName = dayNames[dayNum];
+        const day = date.format('DD/MM');
+        
+        message += `\n${dayNum + 1}️⃣: ${dayName} ${day} ${time}`;
     });
 
     message += "\n🚫: kan inte denna vecka😭";
@@ -177,6 +217,7 @@ const sendActivityMessage = async (activity, channelId) => {
 
     // React to the message with emojis 1 through 7
     for (let i = 1; i <= 7; i++) {
+        if (activityTimes[i - 1] === 'x') continue;
         await sentMessage.react(i + '️⃣');
     }
 
@@ -189,52 +230,19 @@ const fetchLatestActivityMessage = async (channelId) => {
     return messages.first();
 };
 
-const sendReminder = async (activity, channelId, roleName) => {
+const sendReminder = async (activity, channelId, roleName, reminderChannelId) => {
     const nonResponders = await fetchNonResponders(channelId, roleName);
     if (nonResponders.length > 0) {
         const latestActivityMessage = await fetchLatestActivityMessage(channelId);
         const reminder = `Påminnelse: Svara på veckans ${activity}-signup [här](${latestActivityMessage?.url})!\n` + nonResponders.map(member => member.toString()).join(" ");
-        const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID);
+        const reminderChannel = client.channels.cache.get(reminderChannelId);
         await reminderChannel.send(reminder);
     }
 };
 
-// Bot event listeners and scheduled tasks
-client.once('ready', () => {
-    console.log(`Logged in as ${client.user?.tag}!`);
-
-    // Weekly messages on Mondays at noon
-    schedule('0 12 * * 1', async () => {
-        await sendActivityMessage('gym', GYM_CHANNEL_ID);
-        await sendActivityMessage('spring', RUN_CHANNEL_ID);
-    }, timezoneOption);
-
-    // Summary messages on Fridays at noon
-    schedule('0 12 * * 5', async () => {
-        const gymSchedule = await getActivitySchedule(GYM_CHANNEL_ID);
-        const runSchedule = await getActivitySchedule(RUN_CHANNEL_ID);
-
-        const weeklySchedule = determineOptimalSchedule(gymSchedule, runSchedule);
-        const message = formatScheduleMessage(weeklySchedule);
-        const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
-        await announcementChannel.send(message);
-    }, timezoneOption);
-
-    // Reminders for users who haven't responded
-    schedule('0 12 * * 2-4', async () => {
-        await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring');
-        await sendReminder('gym', RUN_CHANNEL_ID, 'gym');
-    }, timezoneOption);
-
-    // Daily activity reminders
-    schedule('0 9 * * *', async () => {
-        await sendActivityReminder();
-    }, timezoneOption);
-});
-
-const sendActivityReminder = async () => {
-    const reminderChannel = client.channels.cache.get(REMINDER_CHANNEL_ID);
-    const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
+const sendActivityReminder = async (reminderChannelId, announcementChannelId) => {
+    const reminderChannel = client.channels.cache.get(reminderChannelId);
+    const announcementChannel = client.channels.cache.get(announcementChannelId);
     const summaryMessages = await announcementChannel.messages.fetch({ limit: 2 });
 
     if (summaryMessages.size > 0) {
@@ -253,6 +261,64 @@ const sendActivityReminder = async () => {
         }
     }
 };
+
+const client = new Client({
+    intents: [
+        IntentsBitField.Flags.Guilds,
+        IntentsBitField.Flags.GuildMessages,
+        IntentsBitField.Flags.GuildMessageReactions,
+        IntentsBitField.Flags.GuildMembers,
+    ],
+});
+
+// Bot event listeners and scheduled tasks
+client.once('ready', () => {
+    
+    const timezoneOption = {
+        timezone: 'Europe/Stockholm',
+        scheduled: true
+    };
+    
+    const GYM_CHANNEL_ID = process.env.GYM_CHANNEL_ID;
+    const RUN_CHANNEL_ID = process.env.RUN_CHANNEL_ID;
+    const ANNOUNCEMENT_CHANNEL_ID = process.env.ANNOUNCEMENT_CHANNEL_ID;
+    const REMINDER_CHANNEL_ID = process.env.REMINDER_CHANNEL_ID;
+    const TIME_CHANNEL_ID = process.env.TIME_CHANNEL_ID;
+    const dayNames = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"];
+
+    console.log(`Logged in as ${client.user?.tag}!`);
+
+    // Weekly messages on Mondays at noon
+    schedule('0 12 * * 1', async () => {
+        await sendActivityMessage('gym', GYM_CHANNEL_ID, dayNames, timeChannelId);
+        await sendActivityMessage('spring', RUN_CHANNEL_ID, dayNames, timeChannelId);
+    }, timezoneOption);
+
+    // Summary messages on Fridays at noon
+    schedule('0 12 * * 5', async () => {
+        const gymSchedule = await getActivitySchedule(GYM_CHANNEL_ID);
+        const runSchedule = await getActivitySchedule(RUN_CHANNEL_ID);
+
+        const weeklySchedule = await determineOptimalSchedule(
+            gymSchedule, runSchedule, TIME_CHANNEL_ID, dayNames);
+        const message = formatScheduleMessage(weeklySchedule);
+        const announcementChannel = client.channels.cache.get(ANNOUNCEMENT_CHANNEL_ID);
+        await announcementChannel.send(message);
+    }, timezoneOption);
+
+    // Reminders for users who haven't responded
+    schedule('0 12 * * 2-4', async () => {
+        await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring');
+        await sendReminder('gym', RUN_CHANNEL_ID, 'gym');
+    }, timezoneOption);
+
+    // Daily activity reminders
+    schedule('0 9 * * *', async () => {
+        await sendActivityReminder(REMINDER_CHANNEL_ID, ANNOUNCEMENT_CHANNEL_ID);
+    }, timezoneOption);
+});
+
+const TOKEN = process.env.TOKEN;
 
 // Start the bot
 client.login(TOKEN);
