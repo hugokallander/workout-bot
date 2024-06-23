@@ -7,9 +7,11 @@ const getStockholmTime = () => moment.tz('Europe/Stockholm');
 
 const nextWeekDates = () => {
     const now = getStockholmTime();
+    const nextWeekNumber = now.isoWeek() + 1;
     const dates = [];
-    for (let i = 7; i < 14; i++) {
-        dates.push(now.clone().add(i, 'days'));
+    for (let dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
+        const date = now.clone().isoWeek(nextWeekNumber).isoWeekday(dayOfWeek);
+        dates.push(date);
     }
     return dates;
 };
@@ -63,7 +65,7 @@ async function getActivityTimes(timeChannelId, dayNames) {
 
     const { currentWeekNumber, previousWeekNumber } = getCurrentAndPreviousWeekNumbers();
     const channel = client.channels.cache.get(timeChannelId);
-    const messages = await channel.messages.fetch({ limit: 1000 });
+    const messages = await channel.messages.fetch({ limit: 100 });
 
     messages.forEach(message => {
         if (isMessageRelevant(message, currentWeekNumber, previousWeekNumber)) {
@@ -97,7 +99,7 @@ const findBestSchedule = (runDaysTarget, gymSchedule, runSchedule, schedule = ne
         if (runSchedule[runDay].length === 0) continue;
         const newSchedule = [...schedule];
         newSchedule[runDay] = 'run';
-        const newFullSchedule = findBestSchedule(runDaysTarget, gymSchedule, runSchedule, numAssignedRunDays + 1, runDay, newSchedule, maxNumParticipants);
+        const newFullSchedule = findBestSchedule(runDaysTarget, gymSchedule, runSchedule, newSchedule, numAssignedRunDays + 1, runDay, maxNumParticipants);
         const newNumParticipants = totalNumParticipants(newFullSchedule, gymSchedule, runSchedule);
 
         if (newNumParticipants > maxNumParticipants && isValidSchedule(newFullSchedule)) {
@@ -126,7 +128,7 @@ const determineOptimalSchedule = async (gymSchedule, runSchedule, timeChannelId,
         if (!activityName) {
             return null;
         }
-        getActivityObj(activityName, dayNum, gymSchedule, runSchedule, activityTimes[activityName][dayNum])
+        return getActivityObj(activityName, dayNum, gymSchedule, runSchedule, activityTimes[activityName][dayNum])
     });
 
     return weeklySchedule;
@@ -147,6 +149,7 @@ const formatScheduleMessage = (weeklySchedule, dayNames) => {
         const time = dayActivity.time;
         message += `- ${day} ${dayActivity.date} ${activity} kl. ${time}: ${users}\n`;
     }
+
     return message;
 };
 
@@ -188,17 +191,21 @@ const fetchNonResponders = async (channelId, roleName) => {
 const getActivitySchedule = async (channelId) => {
     const messages = await fetchChannelMessages(channelId);
     const reactions = messages.first()?.reactions.cache;
-    
+
     const schedule = await fetchReactionsUsers(Array.from(reactions?.values() || []));
 
     return schedule;
 }
 
-const sendActivityMessage = async (activity, channelId, dayNames, timeChannelId) => {
+const sendActivityMessage = async (activity, roleName, channelId, dayNames, timeChannelId) => {
     const dates = nextWeekDates();
-    const weekNumber = dates[0].isoWeek() + 1;
-    const activityTimes = await getActivityTimes(timeChannelId, dayNames)[activity];
-    let message = `@${activity} Välj de dagar du kan ${activity}a för vecka ${weekNumber}:`;
+    const weekNumber = dates[0].isoWeek();
+    const activitiesTimes = await getActivityTimes(timeChannelId, dayNames);
+    const activityTimes = activitiesTimes[activity];
+    const channel = client.channels.cache.get(channelId);
+    const role = channel.guild.roles.cache.find(role => role.name === roleName);
+    const roleId = role.id;
+    let message = `<@&${roleId}> Välj de dagar du kan ${roleName}a för vecka ${weekNumber}:`;
 
     dates.forEach((date, dayNum) => {
         const time = activityTimes[dayNum];
@@ -212,7 +219,6 @@ const sendActivityMessage = async (activity, channelId, dayNames, timeChannelId)
 
     message += "\n🚫: kan inte denna vecka😭";
 
-    const channel = client.channels.cache.get(channelId);
     const sentMessage = await channel.send(message);
 
     // React to the message with emojis 1 through 7
@@ -309,8 +315,8 @@ client.once('ready', () => {
 
     // Weekly messages on Mondays at noon
     schedule('0 12 * * 1', async () => {
-        await sendActivityMessage('gym', GYM_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
-        await sendActivityMessage('spring', RUN_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
+        await sendActivityMessage('gym', 'lyft', GYM_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
+        await sendActivityMessage('run', 'spring', RUN_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
     }, timezoneOption);
 
     // Summary messages on Fridays at noon
@@ -327,8 +333,8 @@ client.once('ready', () => {
 
     // Reminders for users who haven't responded
     schedule('0 12 * * 2-4', async () => {
-        await sendReminder('löpnings', GYM_CHANNEL_ID, 'spring', REMINDER_CHANNEL_ID_OUT);
-        await sendReminder('gym', RUN_CHANNEL_ID, 'gym', REMINDER_CHANNEL_ID_OUT);
+        await sendReminder('löpnings', RUN_CHANNEL_ID, 'spring', REMINDER_CHANNEL_ID_OUT);
+        await sendReminder('gym', GYM_CHANNEL_ID, 'gym', REMINDER_CHANNEL_ID_OUT);
     }, timezoneOption);
 
     // Daily activity reminders
