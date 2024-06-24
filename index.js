@@ -260,8 +260,9 @@ const sendActivityReminder = async (reminderChannelId, announcementChannelId) =>
             const lines = summaryMessage.content.split('\n') || [];
             for (const line of lines) {
                 if (line.includes(dateStr)) {
-                    const participants = line.split(':')[1].trim();
-                    dateMessages[dateStr] = `Påminnelse: Dagens aktivitet (${line.split(':')[0]}): ${participants}`;
+                    const split_line = line.split(':');
+                    const participants = split_line[2].trim();
+                    dateMessages[dateStr] = `Påminnelse: Dagens aktivitet (${split_line[0]}:${split_line[1]}): ${participants}`;
                 }
             }
         }
