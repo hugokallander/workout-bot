@@ -216,6 +216,7 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
     const role = channel.guild.roles.cache.find(role => role.name === roleName);
     const roleId = role.id;
     let message = `<@&${roleId}> Välj de dagar du kan ${roleName}a för vecka ${weekNumber}:`;
+    let shouldSendMessage = false;
 
     dates.forEach((date, dayNum) => {
         const time = activityTimes[dayNum];
@@ -225,8 +226,11 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
         const day = date.format('DD/MM');
         
         message += `\n${dayNum + 1}️⃣: ${dayName} ${day} ${time}`;
+        shouldSendMessage = true;
     });
 
+    if (!shouldSendMessage) return;
+    
     message += "\n🚫: kan inte denna vecka😭";
 
     const sentMessage = await channel.send(message);
