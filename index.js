@@ -236,6 +236,7 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
         if (activityTimes[i - 1] === 'x') continue;
         await sentMessage.react(i + '️⃣');
     }
+    await sentMessage.react('🚫');
 
     return sentMessage;
 };
