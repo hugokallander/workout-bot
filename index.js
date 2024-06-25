@@ -66,8 +66,9 @@ async function getActivityTimes(timeChannelId, dayNames) {
     const { currentWeekNumber, previousWeekNumber } = getCurrentAndPreviousWeekNumbers();
     const channel = client.channels.cache.get(timeChannelId);
     const messages = await channel.messages.fetch({ limit: 100 });
+    const messageArrRev = Array.from(messages.values()).reverse();
 
-    messages.forEach(message => {
+    messageArrRev.forEach(message => {
         if (isMessageRelevant(message, currentWeekNumber, previousWeekNumber)) {
             message.content.split('\n').forEach(line => {
                 processLine(line, dayNames, activityTimes);
@@ -153,9 +154,11 @@ const formatScheduleMessage = (weeklySchedule, dayNames) => {
     return message;
 };
 
-const fetchChannelMessages = async (channelId) => {
+const fetchLatestChannelMessage = async (channelId) => {
     const channel = client.channels.cache.get(channelId);
-    return await channel.messages.fetch({ limit: 1 });
+    const messages = await channel.messages.fetch({ limit: 1 });
+
+    return messages.first();
 };
 
 const fetchReactionsUsers = async (reactions) => {
@@ -171,8 +174,7 @@ const fetchReactionsUsers = async (reactions) => {
 
 const fetchNonResponders = async (channelId, roleName) => {
     const channel = client.channels.cache.get(channelId);
-    const messages = await fetchChannelMessages(channelId);
-    const message = messages.first();
+    const message = await fetchLatestChannelMessage(channelId);
     const reactions = message?.reactions.cache;
     const responders = new Set();
 
@@ -183,14 +185,22 @@ const fetchNonResponders = async (channelId, roleName) => {
         }
     }
 
+    await channel.guild.roles.fetch();
+    await channel.guild.members.fetch();
+
     const role = channel.guild.roles.cache.find(role => role.name === roleName);
-    const members = role?.members || new Map();
-    return Array.from(members.values()).filter(member => !responders.has(member.id) && member.id !== client.user?.id);
+    const nonResponders = channel.guild.members.cache.filter(
+        member => member.roles.cache.has(role.id)
+        && !responders.has(member.user.id)
+        && member.user.id !== client.user?.id
+    );
+
+    return Array.from(nonResponders.values());
 };
 
 const getActivitySchedule = async (channelId) => {
-    const messages = await fetchChannelMessages(channelId);
-    const reactions = messages.first()?.reactions.cache;
+    const messages = await fetchLatestChannelMessage(channelId);
+    const reactions = messages?.reactions.cache;
 
     const schedule = await fetchReactionsUsers(Array.from(reactions?.values() || []));
 
@@ -230,16 +240,11 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
     return sentMessage;
 };
 
-const fetchLatestActivityMessage = async (channelId) => {
-    const channel = client.channels.cache.get(channelId);
-    const messages = await channel.messages.fetch({ limit: 1 });
-    return messages.first();
-};
-
 const sendReminder = async (activity, channelId, roleName, reminderChannelId) => {
     const nonResponders = await fetchNonResponders(channelId, roleName);
-    if (nonResponders.length > 0) {
-        const latestActivityMessage = await fetchLatestActivityMessage(channelId);
+    console.log(nonResponders);
+    if (nonResponders.length > 1) {
+        const latestActivityMessage = await fetchLatestChannelMessage(channelId);
         const reminder = `Påminnelse: Svara på veckans ${activity}-signup [här](${latestActivityMessage?.url})!\n` + nonResponders.map(member => member.toString()).join(" ");
         const reminderChannel = client.channels.cache.get(reminderChannelId);
         await reminderChannel.send(reminder);
@@ -250,27 +255,32 @@ const sendActivityReminder = async (reminderChannelId, announcementChannelId) =>
     const reminderChannel = client.channels.cache.get(reminderChannelId);
     const announcementChannel = client.channels.cache.get(announcementChannelId);
     const summaryMessages = await announcementChannel.messages.fetch({ limit: 10 });
-    let dateMessages = {};
+    const summaryMessageArrRev = Array.from(summaryMessages.values()).reverse();
+    let dateMessage = "";
 
-    if (summaryMessages.size > 0) {
+    if (summaryMessageArrRev.length > 0) {
         const now = getStockholmTime();
         const dateStr = now.format('DD/MM');
 
-        for (const summaryMessage of summaryMessages.values()) {
+        for (const summaryMessage of summaryMessageArrRev) {
             const lines = summaryMessage.content.split('\n') || [];
             for (const line of lines) {
                 if (line.includes(dateStr)) {
                     const split_line = line.split(':');
-                    const participants = split_line[2].trim();
-                    dateMessages[dateStr] = `Påminnelse: Dagens aktivitet (${split_line[0]}:${split_line[1]}): ${participants}`;
+                    if (split_line.length < 3) {
+                        const participants = split_line[1].trim();
+                        dateMessage = `Påminnelse: Dagens aktivitet (${split_line[0]}): ${participants}`;
+                    }
+                    else {
+                        const participants = split_line[2].trim();
+                        dateMessage = `Påminnelse: Dagens aktivitet (${split_line[0]}:${split_line[1]}): ${participants}`;
+                    }
                 }
             }
         }
     }
 
-    for (const dateMessage of Object.values(dateMessages)) {
-        await reminderChannel.send(dateMessage);
-    }
+    await reminderChannel.send(dateMessage);
 };
 
 const client = new Client({
@@ -335,7 +345,7 @@ client.once('ready', () => {
     // Reminders for users who haven't responded
     schedule('0 12 * * 2-4', async () => {
         await sendReminder('löpnings', RUN_CHANNEL_ID, 'spring', REMINDER_CHANNEL_ID_OUT);
-        await sendReminder('gym', GYM_CHANNEL_ID, 'gym', REMINDER_CHANNEL_ID_OUT);
+        await sendReminder('gym', GYM_CHANNEL_ID, 'lyft', REMINDER_CHANNEL_ID_OUT);
     }, timezoneOption);
 
     // Daily activity reminders
