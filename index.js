@@ -330,13 +330,13 @@ client.once('ready', () => {
     console.log(`Logged in as ${client.user?.tag}!`);
 
     // Weekly messages on Mondays at noon
-    schedule('0 12 * * 1', async () => {
+    schedule('0 12 * * 3', async () => {
         await sendActivityMessage('gym', 'lyft', GYM_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
         await sendActivityMessage('run', 'spring', RUN_CHANNEL_ID_OUT, DAY_NAMES, TIME_CHANNEL_ID);
     }, timezoneOption);
 
     // Summary messages on Fridays at noon
-    schedule('0 12 * * 5', async () => {
+    schedule('0 12 * * 7', async () => {
         const gymSchedule = await getActivitySchedule(GYM_CHANNEL_ID);
         const runSchedule = await getActivitySchedule(RUN_CHANNEL_ID);
 
@@ -348,7 +348,7 @@ client.once('ready', () => {
     }, timezoneOption);
 
     // Reminders for users who haven't responded
-    schedule('0 12 * * 2-4', async () => {
+    schedule('0 12 * * 4-6', async () => {
         await sendReminder('löpnings', RUN_CHANNEL_ID, 'spring', REMINDER_CHANNEL_ID_OUT);
         await sendReminder('gym', GYM_CHANNEL_ID, 'lyft', REMINDER_CHANNEL_ID_OUT);
     }, timezoneOption);
