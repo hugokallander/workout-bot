@@ -230,7 +230,7 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
     });
 
     if (!shouldSendMessage) return;
-    
+
     message += "\n🚫: kan inte denna vecka😭";
 
     const sentMessage = await channel.send(message);
@@ -250,7 +250,7 @@ const sendReminder = async (activity, channelId, roleName, reminderChannelId) =>
     console.log(nonResponders);
     if (nonResponders.length > 1) {
         const latestActivityMessage = await fetchLatestChannelMessage(channelId);
-        const reminder = `Påminnelse: Svara på veckans ${activity}-signup [här](${latestActivityMessage?.url})!\n` + nonResponders.map(member => member.toString()).join(" ");
+        const reminder = `Påminnelse: Svara på veckans ${activity}-signup här: <${latestActivityMessage?.url}>\n` + nonResponders.map(member => member.toString()).join(" ");
         const reminderChannel = client.channels.cache.get(reminderChannelId);
         await reminderChannel.send(reminder);
     }
