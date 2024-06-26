@@ -247,7 +247,6 @@ const sendActivityMessage = async (activity, roleName, channelId, dayNames, time
 
 const sendReminder = async (activity, channelId, roleName, reminderChannelId) => {
     const nonResponders = await fetchNonResponders(channelId, roleName);
-    console.log(nonResponders);
     if (nonResponders.length > 1) {
         const latestActivityMessage = await fetchLatestChannelMessage(channelId);
         const reminder = `Påminnelse: Svara på veckans ${activity}-signup här: <${latestActivityMessage?.url}>\n` + nonResponders.map(member => member.toString()).join(" ");
