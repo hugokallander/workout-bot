@@ -131,16 +131,19 @@ const determineOptimalSchedule = async (gymSchedule, runSchedule, timeChannelId,
 
 const formatUsers = (users) => {
     return users
-        .filter(user => user.id !== client.user?.id).
-        map(user => user.toString()).join(' ');
+        .map(user => user.toString()).join(' ');
 };
 
 const formatScheduleMessage = (weeklySchedule, dayParams) => {
     let message = '';
 
+    if (weeklySchedule.length === 0) {
+        return 'Ingen har anmält sig den här veckan. Kom igen nu alla!!!'
+    };
+
     for (let i = 0; i < weeklySchedule.length; i++) {
         const dayActivity = weeklySchedule[i];
-        if (!dayActivity) {
+        if (!dayActivity || dayActivity.users.length === 0) {
             continue;
         }
 
@@ -167,10 +170,11 @@ const getLatestMessage = async (channelId) => {
 
 const fetchDayResponders = async (message) => {
     const users = [];
-    const reactions = await message.reactions.fetch();
+    const refreshedMessage = await message.channel.messages.fetch(message.id);
+    const reactions = refreshedMessage.reactions.cache;
     for (const reaction of reactions.values()) {
         if (reaction.emoji.name && /^[\u0031-\u0037]\uFE0F\u20E3$/.test(reaction.emoji.name)) {
-            const fetchedUsers = await reaction.users.fetch();
+            const fetchedUsers = reaction.users.cache;
             users[parseInt(reaction.emoji.name) - 1] = Array.from(fetchedUsers.values());
         }
     }
@@ -181,7 +185,9 @@ const getActivityResponders = async (channelId) => {
     const message = await getLatestMessage(channelId);
 
     if (message) {
-        return await fetchDayResponders(message);
+        const dayResponders = await fetchDayResponders(message);
+        const dayRespondersExceptClient = dayResponders.map(users => users.filter(user => user.id !== client.user?.id));
+        return dayRespondersExceptClient;
     }
 
     return [];
@@ -189,32 +195,45 @@ const getActivityResponders = async (channelId) => {
 
 const getResponderSet = async (message) => {
     const responders = new Set();
-    const reactions = await message.reactions.fetch();
+    const refreshedMessage = await message.channel.messages.fetch(message.id);
+    const reactions = refreshedMessage.reactions.cache;
     for (const reaction of reactions.values()) {
-        const fetchedUsers = await reaction.users.fetch();
+        const fetchedUsers = reaction.users.cache;
         fetchedUsers.forEach(user => responders.add(user.id));
     }
     return responders;
 }
 
 const validNonResponder = async (member, roleId, responders) => {
-    const memberRoles = await member.roles.fetch();
+    const memberRoles = member.roles.cache;
+    
     return memberRoles.has(roleId)
-    && !responders.has(member.user.id)
-    && member.user.id !== client.user?.id;
+        && !responders.has(member.user.id)
+        && member.user.id !== client.user?.id;
 }
 
-const fetchNonResponders = async (channelId, roleId) => {
+const fetchNonRespondersFromChannel = async (channel, roleId, responders) => {
+    const guild = channel.guild;
+    const channelMembers = await guild.members.fetch();
+    const nonResponderPromises = Array
+        .from(channelMembers.values())
+        .map(async member => {
+            const fetchedMember = await guild.members.fetch(member.id);
+            return validNonResponder(guild, fetchedMember, roleId, responders) ? fetchedMember : null;
+        })
+    return await Promise.all(
+        nonResponderPromises
+    ).then(results => results.filter(member => member !== null));
+}
+
+const fetchNonRespondersFromIds = async (channelId, roleId) => {
     const message = await getLatestMessage(channelId);
-    const responders = getResponderSet(message);
-    
+    const responders = await getResponderSet(message);
     const channel = await client.channels.fetch(channelId);
+    const nonResponders = await fetchNonRespondersFromChannel(channel, roleId, responders);
+    const nonRespondersExceptClient = nonResponders.filter(member => member.user.id !== client.user?.id);
 
-    const nonResponders = await channel.guild.members.fetch().filter(
-        member => validNonResponder(member, roleId, responders)
-    );
-
-    return Array.from(nonResponders.values());
+    return nonRespondersExceptClient;
 };
 
 const reactToMessage = async (message, activityTimes) => {
@@ -256,7 +275,7 @@ const sendActivityMessage = async (roleId, channelId, timeChannelId, activityHid
 };
 
 const sendReminder = async (activityName, channelId, roleId, reminderChannelId) => {
-    const nonResponders = await fetchNonResponders(channelId, roleId);
+    const nonResponders = await fetchNonRespondersFromIds(channelId, roleId);
     if (nonResponders.length > 0) {
         const latestActivityMessage = await getLatestMessage(channelId);
         const nonResponderString = nonResponders.map(member => member.toString()).join(' ');
@@ -272,8 +291,13 @@ const getDateMessage = async (line, runDisplayName, gymChannelId, runChannelId, 
     const nowDay = now.day();
     const participants = line.includes(runDisplayName) ? runSchedule[nowDay] : gymSchedule[nowDay];
 
+    if (participants.length === 0) {
+        return 'Ingen kommer på dagens aktivitet?? 😭'
+    }
+
     const split_line = line.split(':');
     const participantString = formatUsers(participants);
+
     if (split_line.length < 3) {
         return `Dagens aktivitet (${split_line[0]}): ${participantString}`;
     }
@@ -302,12 +326,12 @@ const getActivityLine = (messages, now) => {
 }
 
 const sendActivityReminder = async (channelIds, runDisplayName, now) => {
-    const summaryMessages = getLatestMessages(channelIds.announcement, 10);
+    const summaryMessages = await getLatestMessages(channelIds.announcement, 10);
     const activityLine = getActivityLine(summaryMessages, now);
 
     if (activityLine !== '') {
-        const dateMessage = getDateMessage(activityLine, runDisplayName, channelIds.gym, channelIds.run, now);
-        await sendToChannelId(channelIds.reminder, dateMessage);
+        const dateMessage = await getDateMessage(activityLine, runDisplayName, channelIds.gym, channelIds.run, now);
+        await sendToChannelId(channelIds.reminderOut, dateMessage);
     }
 };
 
@@ -318,7 +342,7 @@ const sendAnnouncementMessage = async (channelIds, DAY_PARAMS) => {
     const now = getStockholmTime();
     const weeklySchedule = await determineOptimalSchedule(
         gymSchedule, runSchedule, channelIds.time, now, DAY_PARAMS);
-    const message = formatScheduleMessage(weeklySchedule, DAY_PARAMS.dayNames);
+    const message = formatScheduleMessage(weeklySchedule, DAY_PARAMS);
     const announcementChannel = await client.channels.fetch(channelIds.announcementOut);
     await announcementChannel.send(message);
 };
@@ -365,10 +389,10 @@ const clientReady = () => {
         test: process.env.TEST_CHANNEL_ID,
         runRole: process.env.RUN_ROLE_ID,
         gymRole: process.env.GYM_ROLE_ID,
-        gymOut: GYM_CHANNEL_ID_OUT,
-        runOut: RUN_CHANNEL_ID_OUT,
-        announcementOut: ANNOUNCEMENT_CHANNEL_ID_OUT,
-        reminderOut: REMINDER_CHANNEL_ID_OUT
+        gymOut: process.env.GYM_CHANNEL_ID,
+        runOut: process.env.RUN_CHANNEL_ID,
+        announcementOut: process.env.ANNOUNCEMENT_CHANNEL_ID,
+        reminderOut: process.env.REMINDER_CHANNEL_ID
     };
 
     if (outputToTestChannel) {
@@ -382,26 +406,42 @@ const clientReady = () => {
 
     // Weekly messages on Wednesdays at noon
     schedule('0 12 * * 3', async () => {
-        const now = getStockholmTime();
-        await sendActivityMessage(channelIds.gymRole, channelIds.gymOut, channelIds.time, DAY_PARAMS.gymHiddenName, DAY_PARAMS.gymVerb, now, DAY_PARAMS);
-        await sendActivityMessage(channelIds.runRole, channelIds.runOut, channelIds.time, DAY_PARAMS.runHiddenName, DAY_PARAMS.runVerb, now, DAY_PARAMS);
+        try {
+            const now = getStockholmTime();
+            await sendActivityMessage(channelIds.gymRole, channelIds.gymOut, channelIds.time, DAY_PARAMS.gymHiddenName, DAY_PARAMS.gymVerb, now, DAY_PARAMS);
+            await sendActivityMessage(channelIds.runRole, channelIds.runOut, channelIds.time, DAY_PARAMS.runHiddenName, DAY_PARAMS.runVerb, now, DAY_PARAMS);
+        } catch (error) {
+            console.log('Error in Wednesday schedule:', error);
+        }
     }, timezoneOption);
-
+    
     // Summary messages on Sundays at noon
     schedule('0 12 * * 7', async () => {
-        sendAnnouncementMessage(channelIds, DAY_PARAMS);
+        try {
+            sendAnnouncementMessage(channelIds, DAY_PARAMS);
+        } catch (error) {
+            console.log('Error in Sunday schedule:', error);
+        }
     }, timezoneOption);
-
+    
     // Reminders for users who haven't responded
     schedule('0 12 * * 4-6', async () => {
-        await sendReminder('löpnings', channelIds.run, channelIds.runRole, channelIds.reminderOut);
-        await sendReminder('gym', channelIds.gym, channelIds.gymRole, channelIds.reminderOut);
+        try {
+            await sendReminder('löpnings', channelIds.run, channelIds.runRole, channelIds.reminderOut);
+            await sendReminder('gym', channelIds.gym, channelIds.gymRole, channelIds.reminderOut);
+        } catch (error) {
+            console.log('Error in Thursday to Saturday schedule:', error);
+        }
     }, timezoneOption);
-
+    
     // Daily activity reminders
     schedule('0 9 * * *', async () => {
-        const now = getStockholmTime();
-        await sendActivityReminder(channelIds, DAY_PARAMS.runDisplayName, now);
+        try {
+            const now = getStockholmTime();
+            await sendActivityReminder(channelIds, DAY_PARAMS.runDisplayName, now);
+        } catch (error) {
+            console.log('Error in daily activity reminder schedule:', error);
+        }
     }, timezoneOption);
 }
 
