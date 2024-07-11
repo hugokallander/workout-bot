@@ -204,7 +204,7 @@ const getResponderSet = async (message) => {
     return responders;
 }
 
-const validNonResponder = async (member, roleId, responders) => {
+const validNonResponder = (member, roleId, responders) => {
     const memberRoles = member.roles.cache;
     
     return memberRoles.has(roleId)
@@ -217,13 +217,11 @@ const fetchNonRespondersFromChannel = async (channel, roleId, responders) => {
     const channelMembers = await guild.members.fetch();
     const nonResponderPromises = Array
         .from(channelMembers.values())
-        .map(async member => {
-            const fetchedMember = await guild.members.fetch(member.id);
-            return validNonResponder(guild, fetchedMember, roleId, responders) ? fetchedMember : null;
-        })
-    return await Promise.all(
-        nonResponderPromises
-    ).then(results => results.filter(member => member !== null));
+        .map(member => guild.members.fetch(member.id));
+    const results = await Promise.all(nonResponderPromises)
+    const nonResponders = results.filter(member => validNonResponder(member, roleId, responders));
+
+    return nonResponders;
 }
 
 const fetchNonRespondersFromIds = async (channelId, roleId) => {
