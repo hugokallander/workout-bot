@@ -157,10 +157,16 @@ const formatScheduleMessage = (weeklySchedule, dayParams) => {
     return message;
 };
 
-const getLatestMessages = async (channelId, limit) => {
+const getLatestMessages = async (channelId, limit, recentFirst=false) => {
     const channel = await client.channels.fetch(channelId);
     const messages = await channel.messages.fetch({ limit: limit });
-    return Array.from(messages.values()).reverse();
+    const messageArr = Array.from(messages.values())
+    
+    if (recentFirst) {
+        return messageArr;
+    }
+    
+    return messageArr.reverse();
 };
 
 const getLatestMessage = async (channelId) => {
@@ -174,7 +180,7 @@ const fetchDayResponders = async (message) => {
     const reactions = refreshedMessage.reactions.cache;
     for (const reaction of reactions.values()) {
         if (reaction.emoji.name && /^[\u0031-\u0037]\uFE0F\u20E3$/.test(reaction.emoji.name)) {
-            const fetchedUsers = reaction.users.cache;
+            const fetchedUsers = await reaction.users.fetch();
             users[parseInt(reaction.emoji.name) - 1] = Array.from(fetchedUsers.values());
         }
     }
