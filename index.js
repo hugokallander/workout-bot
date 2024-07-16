@@ -204,7 +204,7 @@ const getResponderSet = async (message) => {
     const refreshedMessage = await message.channel.messages.fetch(message.id);
     const reactions = refreshedMessage.reactions.cache;
     for (const reaction of reactions.values()) {
-        const fetchedUsers = reaction.users.cache;
+        const fetchedUsers = await reaction.users.fetch();
         fetchedUsers.forEach(user => responders.add(user.id));
     }
     return responders;
