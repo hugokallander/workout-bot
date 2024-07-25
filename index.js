@@ -328,7 +328,7 @@ const getActivityLine = (messages, now) => {
 }
 
 const sendActivityReminder = async (channelIds, runDisplayName, now) => {
-    const summaryMessages = await getLatestMessages(channelIds.announcement, 10);
+    const summaryMessages = await getLatestMessage(channelIds.announcement);
     const activityLine = getActivityLine(summaryMessages, now);
 
     if (activityLine !== '') {
