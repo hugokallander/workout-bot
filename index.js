@@ -406,7 +406,7 @@ const clientReady = () => {
     console.log(`Logged in as ${client.user?.tag}!`);
 
     // Weekly messages on Wednesdays at noon
-    schedule('* * * * *', async () => {
+    schedule('0 12 * * 3', async () => {
         try {
             const now = getStockholmTime();
             await sendActivityMessage(channelIds.gymRole, channelIds.gymOut, channelIds.time, DAY_PARAMS.gymHiddenName, DAY_PARAMS.gymVerb, now, DAY_PARAMS);
