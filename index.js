@@ -317,16 +317,14 @@ const sendToChannelId = async (channelId, message) => {
     return sentMessage;
 };
 
-const getActivityLine = (messages, now) => {
+const getActivityLine = (message, now) => {
     const dateStr = now.format('DD/MM');
     let activityLine = '';
 
-    for (const message of messages) {
-        const lines = message.content.split('\n');
-        for (const line of lines) {
-            if (line.includes(dateStr)) {
-                activityLine = line;
-            }
+    const lines = message.content.split('\n');
+    for (const line of lines) {
+        if (line.includes(dateStr)) {
+            activityLine = line;
         }
     }
 
@@ -334,8 +332,8 @@ const getActivityLine = (messages, now) => {
 }
 
 const sendActivityReminder = async (channelIds, runDisplayName, now) => {
-    const summaryMessages = await getLatestMessage(channelIds.announcement);
-    const activityLine = getActivityLine(summaryMessages, now);
+    const summaryMessage = await getLatestMessage(channelIds.announcement);
+    const activityLine = getActivityLine(summaryMessage, now);
 
     if (activityLine !== '') {
         const dateMessage = await getDateMessage(activityLine, runDisplayName, channelIds.gym, channelIds.run, now);
