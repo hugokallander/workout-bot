@@ -30,16 +30,20 @@ const isMessageRelevant = (message, currentWeekNumber) => {
     return isCurrentWeek || isDefault;
 }
 
+const includesNoCase = (text, includeString) => {
+    return text.toLowerCase().includes(includeString.toLowerCase());
+}
+
 const processLine = (line, activityTimes, dayParams) => {
     const timeMatch = line.match(/(\d{2}:\d{2}|x)/);
     if (!timeMatch) return;
 
     dayParams.dayNames.forEach((dayName, index) => {
         const activityTime = timeMatch[0];
-        if (line.toLowerCase().includes(dayName.toLowerCase())) {
-            if (line.includes(dayParams.gymHiddenName) && !line.includes(dayParams.runHiddenName)) {
+        if (includesNoCase(line, dayName)) {
+            if (includesNoCase(line, dayParams.gymHiddenName) && !includesNoCase(line, dayParams.runHiddenName)) {
                 activityTimes.gym[index] = activityTime;
-            } else if (line.includes(dayParams.runHiddenName) && !line.includes(dayParams.gymHiddenName)) {
+            } else if (includesNoCase(line, dayParams.runHiddenName) && !includesNoCase(line, dayParams.gymHiddenName)) {
                 activityTimes.run[index] = activityTime;
             } else {
                 activityTimes.gym[index] = activityTime;
@@ -271,10 +275,12 @@ const sendActivityMessage = async (roleId, channelId, timeChannelId, activityHid
     return sentMessage;
 };
 
-const sendReminder = async (activityName, channelId, roleId, reminderChannelId) => {
+const sendReminder = async (activityName, channelId, roleId, reminderChannelId, dayNames) => {
     const nonResponders = await fetchNonRespondersFromIds(channelId, roleId);
-    if (nonResponders.length > 0) {
-        const latestActivityMessage = await getLatestMessage(channelId);
+    const latestActivityMessage = await getLatestMessage(channelId);
+    const activityMessageHasDayName = dayNames.some(dayName => includesNoCase(latestActivityMessage.content, dayName));
+
+    if (nonResponders.length > 0 && activityMessageHasDayName) {
         const nonResponderString = nonResponders.map(member => member.toString()).join(' ');
         const reminder = `Påminnelse: Svara på veckans ${activityName}-signup här: <${latestActivityMessage?.url}>\n` + nonResponderString;
         await sendToChannelId(reminderChannelId, reminder);
@@ -428,8 +434,8 @@ const clientReady = () => {
     // Reminders for users who haven't responded
     schedule('0 12 * * 4-6', async () => {
         try {
-            await sendReminder('löpnings', channelIds.run, channelIds.runRole, channelIds.reminderOut);
-            await sendReminder('gym', channelIds.gym, channelIds.gymRole, channelIds.reminderOut);
+            await sendReminder('löpnings', channelIds.run, channelIds.runRole, channelIds.reminderOut, DAY_PARAMS.dayNames);
+            await sendReminder('gym', channelIds.gym, channelIds.gymRole, channelIds.reminderOut, DAY_PARAMS.dayNames);
         } catch (error) {
             console.log('Error in Thursday to Saturday schedule:', error);
         }
