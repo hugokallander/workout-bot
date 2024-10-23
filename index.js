@@ -407,10 +407,6 @@ const clientReady = () => {
         channelIds.reminderOut = channelIds.test;
     }
 
-    (async () => {
-        await sendToChannelId(channelIds.announcementOut, "Daisy, Daisy, give me your answer do. I’m half crazy all for the love of you... It won't be a stylish marriage, I can't afford a carriage... But you'll look sweet upon the seat of a bicycle built for... two...");
-    })();
-
     console.log(`Logged in as ${client.user?.tag}!`);
 
     // Weekly messages on Wednesdays at noon
